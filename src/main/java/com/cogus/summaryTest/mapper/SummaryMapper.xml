@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org/DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cogus.summaryTest.mapper.SummaryMapper">
+
+    <select id="getCountList" resultType="com.cogus.summaryTest.vo.CountVO">
+        select sc.subscriberCount, sv.viewCount,
+            round(sv.viewCount/x.totaldays, 1) avgViewCount, sv.likeCount+sv.commentCount responseCount
+        from summary_channel_statistics sc
+        join summary_video_accumulate sv
+        on sc.channelId = sv.channelId and sc.datetime = sv.datetime
+        join(
+            select count(*) totaldays from summary_channel_statistics where channelId = #{channelId} and datetime <![CDATA[ <= ]]> #{endDate}
+        ) x
+        where sc.channelId = #{channelId} and sc.datetime = #{endDate}
+    </select>
+
+    <select id="getEveryCountList" resultType="com.cogus.summaryTest.vo.EveryCountVO">
+        select sc.datetime, sc.subscriberCount, sc.subscriberCountDiff, sr.subscriberGainDiff, sr.subscriberLostDiff,
+            sv.viewCountDiff , sv.likeCountDiff+sv.commentCountDiff responseCountDiff
+        from summary_channel_statistics sc
+        join summary_report_channel_statistics sr
+        on sc.channelId = sr.channelId and sc.datetime = sr.datetime
+        join summary_video_accumulate sv
+        on sc.channelId = sv.channelId and sc.datetime = sv.datetime
+        where sc.channelId = #{channelId} and sc.datetime between #{startDate} and #{endDate}
+    </select>
+
+    <select id="getManyHitsVideoList" resultType="com.cogus.summaryTest.vo.ManyHitsVideoVO">
+        select viewCount, likeCount, commentCount, videoId, title,
+            thumbnail, date_format(convertedPublishedAt, '%Y-%m-%d') date
+        from summary_video_info
+        where videoId = (
+            select videoId
+            from summary_video_statistics
+            where channelId = #{channelId} and datetime between #{startDate} and #{endDate}
+            group by videoId
+            order by sum(viewCountDiff) desc
+            limit 1
+        )
+    </select>
+
+    <select id="getMonthResponseCountList" resultType="com.cogus.summaryTest.vo.MonthResponseVO">
+        select viewCount, responseCount, subscriberCount, videoCount, likeCount, commentCount,
+            round(viewCount/subscriberCount) viewPercent, round(responseCount/subscriberCount) responsePercent
+        from (
+            select sum(sv.viewCountDiff) viewCount, sum(sv.likeCountDiff+commentCountDiff) responseCount,
+                sum(sc.subscriberCountDiff) subscriberCount, sum(sc.videoCountDiff) videoCount,
+                sum(sv.likeCountDiff) likeCount,
+                sum(sv.commentCountDiff) commentCount
+            from summary_video_accumulate sv
+            join summary_channel_statistics sc
+            on sv.datetime = sc.datetime and sv.channelId = sc.channelId
+            where sv.channelId = #{channelId} and sv.datetime between #{startDate} and #{endDate}
+        ) x
+    </select>
+
+    <select id="getDate" resultType="com.cogus.summaryTest.vo.DateVO">
+        select
+        date_format(
+            date_add(
+                str_to_date(#{startDate}, '%Y%m%d'),
+                interval (
+                    select datediff(
+                        str_to_date(#{startDate}, '%Y%m%d'), str_to_date(#{endDate}, '%Y%m%d')
+                    ) - 1
+                ) day
+            )
+        , '%Y%m%d') startdate,
+        date_format(
+            date_add(
+                str_to_date(#{endDate}, '%Y%m%d'),
+                interval (
+                    select datediff(
+                        str_to_date(#{startDate}, '%Y%m%d'), str_to_date(#{endDate}, '%Y%m%d')
+                    ) - 1
+                ) day
+            )
+        , '%Y%m%d')enddate
+    </select>
+
+    <select id="getRecommendedVideo" resultType="com.cogus.summaryTest.vo.RecommendedVideoVO">
+        select sv.videoId, sv.title, date_format(sv.convertedPublishedAt, '%Y-%m-%d') pubDate, sv.thumbnail,
+            sv.viewCount, sv.likeCount, sv.dislikeCount, sv.commentCount, sv.likeCount+sv.dislikeCount+sv.commentCount responseCount
+        from summary_video_info sv
+        join summary_channel_info sc
+        on sv.videoId = sc.unsubscribedTrailer
+        where sc.channelId = #{channelId}
+    </select>
+
+    <select id="getAuthor" resultType="com.cogus.summaryTest.vo.CommentAuthorVO">
+        select count(distinct videoId) videoCount, count(*) commentCount, sc.authorChannelId authorId,
+            max(authorDisplayName) authorName, max(authorProfileImageUrl) authorImgUrl
+        from summary_comment sc
+        join (
+            select authorChannelId
+            from summary_comment
+            where channelId = #{channelId}
+            group by authorChannelId
+            order by count(*) desc, count(distinct videoId) desc
+            limit #{startCount}, 10
+        ) sc2
+        on sc.authorChannelId = sc2.authorChannelId
+        where channelId = #{channelId}
+        group by sc.authorChannelId
+        order by count(*) desc, count(distinct videoId) desc
+    </select>
+</mapper>
